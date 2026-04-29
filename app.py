@@ -28,7 +28,7 @@ if "lista_notas" not in st.session_state: st.session_state.lista_notas = []
 # ========================================================
 # 2. MOTOR DE IA E SEGURANÇA
 # ========================================================
-CHAVE_API = "AIzaSyDdJBDlEcZ2xmzxxZT2ghjKyDHuJvogfNQ" # COLOQUE SUA CHAVE AQUI
+CHAVE_API = "AIzaSyA1BIuyW5T36uXfSPspx4iSZUiRlxIw6oQ" # COLOQUE SUA CHAVE AQUI
 genai.configure(api_key=CHAVE_API)
 
 def selecionar_modelo_disponivel():
