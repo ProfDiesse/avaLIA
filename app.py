@@ -9,197 +9,221 @@ import pandas as pd
 import re
 
 # ========================================================
-# 1. CONFIGURAÇÕES E ESTÉTICA (CSS MOBILE)
+# CONFIGURAÇÃO DA PÁGINA
 # ========================================================
-st.set_page_config(page_title="Gerador e Corretor Pro", layout="wide", page_icon="📝")
-
 st.markdown("""
-    <style>
-    .stButton > button { width: 100%; border-radius: 10px; height: 3em; font-weight: bold; }
-    .metric-card { background-color: #ffffff; padding: 15px; border-radius: 15px; border: 1px solid #e0e0e0; margin-bottom: 10px; }
-    #MainMenu {visibility: hidden;} footer {visibility: hidden;}
-    </style>
-    """, unsafe_allow_html=True)
+<style>
 
-# Inicialização de variáveis de estado
-if "texto_prova" not in st.session_state: st.session_state.texto_prova = ""
-if "lista_notas" not in st.session_state: st.session_state.lista_notas = []
+/* FORÇA TEXTO VISÍVEL */
+input, textarea {
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    background-color: #ffffff !important;
+}
 
-# ========================================================
-# 2. MOTOR DE IA E SEGURANÇA
-# ========================================================
-CHAVE_API = "AIzaSyA1BIuyW5T36uXfSPspx4iSZUiRlxIw6oQ" # COLOQUE SUA CHAVE AQUI
-genai.configure(api_key=CHAVE_API)
+/* WRAPPER DO STREAMLIT */
+div[data-baseweb="input"] input {
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    background-color: #ffffff !important;
+}
 
-def selecionar_modelo_disponivel():
-    try:
-        modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        prioridades = ['models/gemini-1.5-flash-latest', 'models/gemini-1.5-flash', 'models/gemini-pro']
-        for p in prioridades:
-            if p in modelos: return genai.GenerativeModel(model_name=p)
-        return genai.GenerativeModel(model_name=modelos[0])
-    except Exception as e:
-        st.error(f"Erro de API: {str(e)}")
-        st.stop()
+div[data-baseweb="textarea"] textarea {
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    background-color: #ffffff !important;
+}
 
-# ========================================================
-# 3. FUNÇÕES DE SUPORTE (PDF, QR, LIMPEZA)
-# ========================================================
-def limpar_texto_fpdf(texto):
-    if not texto: return ""
-    subs = {"“": '"', "”": '"', "‘": "'", "’": "'", "—": "-", "–": "-", "…": "...", "•": "*"}
-    for original, novo in subs.items(): texto = texto.replace(original, novo)
-    return texto.encode('latin-1', 'replace').decode('latin-1')
+/* PLACEHOLDER */
+input::placeholder, textarea::placeholder {
+    color: #6b7280 !important;
+}
 
-def buscar_imagem(nome_base):
-    for ext in ['.png', '.jpg', '.jpeg']:
-        caminho = nome_base + ext
-        if os.path.exists(caminho): return caminho
-    return None
+/* REMOVE TRANSPARÊNCIAS BUGADAS */
+.stTextInput input, .stTextArea textarea {
+    opacity: 1 !important;
+}
 
-def gerar_qr_code_file(link):
-    try:
-        qr = qrcode.QRCode(version=1, box_size=10, border=1)
-        qr.add_data(link); qr.make(fit=True)
-        img_qr = qr.make_image(fill_color="black", back_color="white")
-        caminho = "temp_qr.png"
-        img_qr.save(caminho)
-        return caminho
-    except: return None
+/* CURSOR (às vezes some também) */
+input, textarea {
+    caret-color: #000000 !important;
+}
 
-def gerar_perguntas_ia(texto_consolidado, tipo_prova):
-    try:
-        model = selecionar_modelo_disponivel()
-        instrucoes = {
-            "Prova Mista": "3 múltipla escolha (A-D), 3 lacunas e 4 dissertativas.",
-            "Prova de Lacuna": "10 questões de completar lacunas.",
-            "Prova Dissertativa": "8 questões dissertativas. Escreva (DISSERTATIVA) ao final.",
-            "Prova Objetiva": "10 questões de múltipla escolha (A-D)."
-        }
-        prompt = f"""Aja como professor. Material: {texto_consolidado[:15000]}
-        Tarefa: {instrucoes.get(tipo_prova)}
-        Regras: Numere 01 a 10. Sem negritos. Fim das abertas com (DISSERTATIVA). 
-        No final, escreva 'GABARITO_OFICIAL' e liste as respostas."""
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e: return f"ERRO IA: {str(e)}"
-
-def corrigir_prova_por_foto(foto_frente, foto_verso, gabarito_oficial):
-    try:
-        model = selecionar_modelo_disponivel()
-        img_frente = PIL.Image.open(foto_frente)
-        prompt = [
-            f"GABARITO OFICIAL: {gabarito_oficial}. Analise a prova e responda EXATAMENTE neste formato:",
-            "NOTA: [0-10]", "ACERTOS: [X de 10]", "FEEDBACK: [resumo]", img_frente
-        ]
-        if foto_verso: prompt.append(PIL.Image.open(foto_verso))
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e: return f"Erro: {str(e)}"
-
-def criar_pdf(escola, materia, prof, conteudo, link_qr, img_extra=None, tipo_prova=""):
-    try:
-        pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.add_page()
-        
-        logo, bandeira = buscar_imagem("logoCivico"), buscar_imagem("BandeiraEscola")
-        if logo: pdf.image(logo, 10, 8, 22)
-        if bandeira: pdf.image(bandeira, 175, 8, 22)
-        
-        if link_qr:
-            arq_qr = gerar_qr_code_file(link_qr)
-            if arq_qr: pdf.image(arq_qr, 150 if bandeira else 175, 8, 18)
-
-        pdf.set_y(10); pdf.set_font("Arial", 'B', 12); pdf.set_left_margin(35)
-        pdf.multi_cell(0, 7, limpar_texto_fpdf(escola.upper()), align='C')
-        
-        pdf.set_left_margin(10); pdf.ln(10); pdf.set_font("Arial", '', 10)
-        pdf.cell(140, 7, f"Aluno(a): {'_'*45}", ln=0)
-        pdf.cell(0, 7, f"Data: {'_/'*2}____", ln=1)
-        pdf.cell(140, 7, limpar_texto_fpdf(f"Componente: {materia}"), ln=0)
-        pdf.cell(0, 7, "Nota: ________", ln=1)
-        pdf.cell(0, 7, limpar_texto_fpdf(f"Professor(a): {prof}"), ln=1)
-        pdf.line(10, pdf.get_y()+2, 200, pdf.get_y()+2); pdf.ln(8)
-
-        if img_extra:
-            with open("temp_extra.png", "wb") as f: f.write(img_extra.getbuffer())
-            pdf.image("temp_extra.png", x=60, w=90); pdf.ln(5)
-
-        partes = conteudo.split('GABARITO_OFICIAL')
-        questoes = partes[0]
-        
-        pdf.set_font("Arial", '', 11)
-        for linha in questoes.split('\n'):
-            txt = linha.strip()
-            if not txt: continue
-            pdf.multi_cell(0, 7, limpar_texto_fpdf(txt))
-            if "(DISSERTATIVA)" in txt.upper():
-                pdf.ln(2)
-                for _ in range(3):
-                    if pdf.get_y() > 275: pdf.add_page()
-                    pdf.line(10, pdf.get_y()+6, 200, pdf.get_y()+6); pdf.ln(8)
-            pdf.ln(1)
-
-        if tipo_prova != "Prova Dissertativa":
-            if pdf.get_y() > 240: pdf.add_page()
-            pdf.set_font("Arial", 'B', 9); pdf.cell(0, 6, "CARTÃO-RESPOSTA", ln=True)
-            pdf.set_font("Arial", '', 8)
-            for i in range(1, 11):
-                pdf.cell(8, 6, f"{i:02}:", 0, 0)
-                for l in ['A', 'B', 'C', 'D']: pdf.cell(7, 6, l, 1, 0, 'C')
-                pdf.cell(5, 6, "", 0, 0)
-                if i == 5: pdf.ln(8)
-
-        return pdf.output(dest='S').encode('latin-1')
-    except Exception as e: return None
+</style>
+""", unsafe_allow_html=True)
 
 # ========================================================
-# 4. INTERFACE
+# CABEÇALHO
+# ========================================================
+st.markdown("""
+<h1 style='text-align: center;'>🧠 Gerador & Corretor Inteligente</h1>
+<p style='text-align: center; color: #94a3b8;'>
+Automatize provas com IA de forma profissional
+</p>
+""", unsafe_allow_html=True)
+
+# ========================================================
+# ESTADO
+# ========================================================
+if "texto_prova" not in st.session_state:
+    st.session_state.texto_prova = ""
+
+if "lista_notas" not in st.session_state:
+    st.session_state.lista_notas = []
+
+# ========================================================
+# API SEGURA
+# ========================================================
+genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+
+def selecionar_modelo():
+    modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+    return genai.GenerativeModel(modelos[0])
+
+# ========================================================
+# FUNÇÕES
+# ========================================================
+def gerar_perguntas(texto, tipo):
+    model = selecionar_modelo()
+
+    prompt = f"""
+    Gere uma prova com base no texto:
+    {texto[:10000]}
+
+    Tipo: {tipo}
+
+    Gere também o GABARITO ao final.
+    """
+
+    with st.spinner("🧠 Gerando prova..."):
+        return model.generate_content(prompt).text
+
+
+def corrigir(foto, gabarito):
+    model = selecionar_modelo()
+    img = PIL.Image.open(foto)
+
+    prompt = [
+        f"GABARITO: {gabarito}",
+        "Corrija e retorne:",
+        "NOTA: 0-10",
+        "ACERTOS:",
+        "FEEDBACK:",
+        img
+    ]
+
+    return model.generate_content(prompt).text
+
+
+def criar_pdf(conteudo):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+
+    for linha in conteudo.split("\n"):
+        pdf.multi_cell(0, 8, linha)
+
+    return pdf.output(dest="S").encode("latin-1")
+
+# ========================================================
+# SIDEBAR
 # ========================================================
 with st.sidebar:
-    st.header("⚙️ Configurações")
-    escola = st.text_input("Escola:", "CECM DOURADINA")
-    prof = st.text_input("Professor:", "Diésse Ricardo da Silva")
-    mat = st.text_input("Matéria:", "Educação Digital")
-    link = st.text_input("Link QR:", "https://suaescola.com")
-    tipo = st.selectbox("Modelo:", ["Prova Mista", "Prova de Lacuna", "Prova Dissertativa", "Prova Objetiva"])
-    img_extra = st.file_uploader("🖼️ Imagem Extra", type=["png", "jpg"])
+    st.title("⚙️ Configurações")
 
-tab1, tab2 = st.tabs(["📝 Elaboração", "📸 Correção"])
+    escola = st.text_input("Escola", "Minha Escola")
+    prof = st.text_input("Professor", "Professor X")
+    mat = st.text_input("Matéria", "Matemática")
 
+    tipo = st.selectbox("Tipo de Prova", [
+        "Mista", "Objetiva", "Dissertativa"
+    ])
+
+# ========================================================
+# ABAS
+# ========================================================
+tab1, tab2 = st.tabs(["📝 Criar Prova", "📸 Corrigir"])
+
+# ========================================================
+# CRIAR PROVA
+# ========================================================
 with tab1:
     col1, col2 = st.columns(2)
+
     with col1:
-        arquivos = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
-        if arquivos and st.button("🤖 Gerar Prova"):
-            texto_full = ""
-            for arq in arquivos:
-                leitor = PdfReader(arq)
-                texto_full += "".join([p.extract_text() for p in leitor.pages if p.extract_text()])
-            st.session_state.texto_prova = gerar_perguntas_ia(texto_full, tipo)
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown("### 📁 Upload de Material")
+
+        arquivos = st.file_uploader("PDFs", type="pdf", accept_multiple_files=True)
+
+        if st.button("✨ Gerar Prova Inteligente"):
+            if arquivos:
+                texto = ""
+                for arq in arquivos:
+                    reader = PdfReader(arq)
+                    for p in reader.pages:
+                        if p.extract_text():
+                            texto += p.extract_text()
+
+                st.session_state.texto_prova = gerar_perguntas(texto, tipo)
+            else:
+                st.warning("Envie PDFs")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
     with col2:
         if st.session_state.texto_prova:
-            st.session_state.texto_prova = st.text_area("Edite:", value=st.session_state.texto_prova, height=300)
-            if st.button("📄 Baixar PDF"):
-                res = criar_pdf(escola, mat, prof, st.session_state.texto_prova, link, img_extra, tipo)
-                if res: st.download_button("📥 Download", res, f"{mat}.pdf")
+            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+            st.markdown("### ✏️ Editor")
 
+            st.session_state.texto_prova = st.text_area(
+                "Edite a prova",
+                st.session_state.texto_prova,
+                height=400
+            )
+
+            if st.button("📄 Gerar Documento Oficial"):
+                pdf = criar_pdf(st.session_state.texto_prova)
+
+                st.download_button(
+                    "📥 Baixar PDF",
+                    pdf,
+                    "prova.pdf"
+                )
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+# ========================================================
+# CORRIGIR
+# ========================================================
 with tab2:
-    if st.session_state.texto_prova:
-        nome_aluno = st.text_input("Nome do Aluno:")
-        foto = st.camera_input("Foto da Prova")
-        if foto and st.button("🚀 Corrigir"):
-            res = corrigir_prova_por_foto(foto, None, st.session_state.texto_prova)
-            nota_match = re.search(r"NOTA:\s*([\d,.]+)", res)
-            nota_final = nota_match.group(1) if nota_match else "Erro"
-            st.session_state.lista_notas.append({"Aluno": nome_aluno or "Anônimo", "Nota": nota_final, "Hora": pd.Timestamp.now().strftime("%H:%M")})
-            st.markdown(res)
+    col1, col2 = st.columns(2)
 
-        if st.session_state.lista_notas:
-            st.divider(); st.subheader("📊 Notas da Turma")
-            df = pd.DataFrame(st.session_state.lista_notas)
-            st.table(df)
-            st.download_button("📥 Baixar Planilha", df.to_csv(index=False).encode('utf-8'), "notas.csv")
-            if st.button("🗑️ Limpar"): st.session_state.lista_notas = []; st.rerun()
-    else: st.warning("Gere a prova na Aba 1 primeiro.")
+    with col1:
+        nome = st.text_input("Nome do aluno")
+        foto = st.camera_input("Foto da prova")
+
+    with col2:
+        if foto:
+            if st.button("🚀 Corrigir com IA"):
+                resultado = corrigir(foto, st.session_state.texto_prova)
+
+                st.markdown("### Resultado")
+                st.info(resultado)
+
+                st.session_state.lista_notas.append({
+                    "Aluno": nome,
+                    "Resultado": resultado
+                })
+
+    if st.session_state.lista_notas:
+        st.markdown("### 📊 Desempenho da Turma")
+
+        df = pd.DataFrame(st.session_state.lista_notas)
+        st.dataframe(df, use_container_width=True, height=300)
+
+        st.download_button(
+            "📥 Exportar CSV",
+            df.to_csv(index=False),
+            "notas.csv"
+        )
